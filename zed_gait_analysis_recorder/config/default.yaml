@@ -1,0 +1,42 @@
+# Parametros por defecto de gait_recorder_node (ver PLAN v2, seccion 4).
+# Los valores que dependen de benchmark (depth_mode, body_detection_model,
+# resolution/fps) se ajustaran tras las mediciones de la Fase 1.
+/**:
+  ros__parameters:
+    # Camara: 0 = primera disponible; si no, numero de serie concreto.
+    camera_serial: 0
+    # Alias estable para namespace/topics/archivos; vacio = "zed<serial>".
+    camera_alias: ""
+    # Ruta a un SVO para modo simulacion; vacio = camara real.
+    svo_path: ""
+
+    # Backend de pose (ADR-009). Futuros: openpose, mediapipe, yolo.
+    pose_backend: "zed_sdk"
+    body_detection_model: "HUMAN_BODY_MEDIUM"  # FAST / MEDIUM / ACCURATE
+    body_format: "BODY_34"                     # BODY_18 / BODY_34 / BODY_38
+    confidence_threshold: 0.5                  # validez por joint (resp. 35)
+
+    # Captura (resp. 14/15/18/56).
+    resolution: "HD720"
+    fps: 60
+    depth_mode: "ULTRA"
+    depth_min_m: 1.5
+    depth_max_m: 10.0
+
+    # Salida de imagen (ADR-003).
+    jpeg_quality: 80
+    publish_raw_image: false
+
+    # Grabacion (ADR-010/011/012).
+    record_topic: "/gait_record"
+    recording_directory: "~/Documents/ZED"
+    csv_sample_period_s: 0.05
+    video_hw_encoder: true
+    video_bitrate: 4000000
+    svo_recording: true
+    svo_compression: "H265"
+    min_free_space_mb: 1024
+
+    # Apertura de camara (ADR-002).
+    open_retries: 5
+    open_retry_delay_s: 2.0

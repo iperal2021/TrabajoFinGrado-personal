@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>zed_gait_analysis_recorder</name>
+  <version>0.1.0</version>
+  <description>Nodo ROS 2 por camara ZED para analisis de marcha: body pose, publicacion de imagen anotada y grabacion de CSV/MP4/SVO2</description>
+
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
