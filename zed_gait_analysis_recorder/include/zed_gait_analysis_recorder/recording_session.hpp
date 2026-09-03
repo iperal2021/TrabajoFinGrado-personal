@@ -42,6 +42,10 @@ public:
 
   ~RecordingSession();
 
+  // El copy ctor borrado suprime el ctor por defecto implicito; se necesita
+  // para usar la clase como miembro por valor.
+  RecordingSession() = default;
+
   // No copiable: los recursos (ficheros, encoder, SVO) son unicos.
   RecordingSession(const RecordingSession &) = delete;
   RecordingSession & operator=(const RecordingSession &) = delete;
