@@ -150,11 +150,11 @@ bool ZedBodyTrackingBackend::init(
 }
 
 PoseResult ZedBodyTrackingBackend::infer(
-  sl::Camera & camera, const sl::Mat & left_image)
+  sl::Camera & camera, const cv::Mat & bgr)
 {
   // El backend zed_sdk obtiene los joints del propio grab(); la imagen la
-  // usaran los backends externos futuros.
-  (void)left_image;
+  // usan los backends externos (mediapipe, ...).
+  (void)bgr;
 
   PoseResult result;
   const sl::ERROR_CODE err = camera.retrieveBodies(bodies_, runtime_);

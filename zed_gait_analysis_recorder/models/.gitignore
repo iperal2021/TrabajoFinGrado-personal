@@ -1,0 +1,2 @@
+# Los modelos .task se descargan con scripts/download_models.sh (ADR-018).
+*.task

@@ -49,6 +49,58 @@ ros2 topic pub --once /gait_record std_msgs/msg/Bool "{data: true}"
 ros2 topic pub --once /gait_record std_msgs/msg/Bool "{data: false}"
 ```
 
+## Backends de pose (`pose_backend`)
+
+| Backend | Joints | Descripción |
+|---|---|---|
+| `zed_sdk` (defecto) | BODY_38 | Body Tracking del propio ZED SDK |
+| `mediapipe` | BlazePose 33 | MediaPipe BlazePose vía worker Python (ADR-018) |
+
+### Puesta en marcha del backend `mediapipe`
+
+```bash
+# 1. Entorno Python dedicado (una vez por máquina)
+python3 -m venv ~/.virtualenvs/zed_dev
+~/.virtualenvs/zed_dev/bin/pip install mediapipe
+
+# 2. Descargar los modelos .task (una vez por máquina, desde el workspace).
+#    Con --symlink-install quedan visibles en share/<pkg>/models/ al instante.
+./src/zed_gait_analysis_recorder/scripts/download_models.sh
+```
+
+El backend se elige por parámetro. Lo más cómodo es copiar
+`config/default.yaml` y ajustar:
+
+```yaml
+/**:
+  ros__parameters:
+    pose_backend: "mediapipe"
+    mediapipe_model_variant: "full"        # lite / full / heavy
+    mediapipe_python: "/home/<usuario>/.virtualenvs/zed_dev/bin/python3"
+```
+
+y lanzar con `config_file:=/ruta/a/tu.yaml`.
+
+Cómo funciona: el nodo C++ lanza `mediapipe_worker.py` como proceso hijo,
+le envía cada frame BGR por un socket Unix y recibe los 33 landmarks 2D con
+su `visibility`. La XYZ se calcula con la profundidad ZED del mismo `grab()`
+(mediana 5×5 + back-proyección con intrínsecos), en metros y frame de
+cámara, igual que con `zed_sdk`. Joints con `visibility < 0.5`: misma
+política de inválidos (ADR-012).
+
+Rendimiento medido (portátil x86, CPU, 640×480): full ≈ 9-10 FPS,
+lite ≈ 10-11 FPS. Si en la Jetson no se llega a 10 FPS con dos cámaras, el
+plan B acordado es: `lite` → bajar resolución → procesar 1 de N frames
+(ADR-018).
+
+Para probar el pipeline sin ROS ni ZED (webcam):
+
+```bash
+~/.virtualenvs/zed_dev/bin/python3 scripts/test_mediapipe_worker.py \
+    --model models/pose_landmarker_full.task            # ventana con esqueleto
+#   ... --no-show --duration 15                         # headless, solo FPS
+```
+
 | Topic | Tipo | Descripción |
 |---|---|---|
 | `/gait_record` | `std_msgs/Bool` | Control global de grabación |

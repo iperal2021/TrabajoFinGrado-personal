@@ -11,8 +11,10 @@
 #include <string>
 #include <utility>
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
 
+#include "zed_gait_analysis_recorder/backends/mediapipe_backend.hpp"
 #include "zed_gait_analysis_recorder/backends/zed_body_tracking_backend.hpp"
 
 namespace zed_gait
@@ -45,14 +47,18 @@ sl::DEPTH_MODE parseDepthMode(const std::string & value)
 }
 
 // Unica "factoria" del proyecto: un if. Backends futuros (resp. 29):
-// "openpose", "mediapipe", "yolo".
+// "openpose", "yolo".
 std::unique_ptr<PoseBackend> createBackend(const std::string & name)
 {
   if (name == "zed_sdk") {
     return std::make_unique<ZedBodyTrackingBackend>();
   }
+  if (name == "mediapipe") {
+    return std::make_unique<MediaPipeBackend>();
+  }
   throw std::runtime_error(
-          "pose_backend desconocido: '" + name + "' (disponibles: zed_sdk)");
+          "pose_backend desconocido: '" + name +
+          "' (disponibles: zed_sdk, mediapipe)");
 }
 
 // Expande '~' al HOME del usuario (p. ej. ~/Documents/ZED).
@@ -111,6 +117,14 @@ GaitRecorderNode::GaitRecorderNode()
     declare_parameter<int64_t>("min_free_space_mb", 1024));
   open_retries_ = declare_parameter<int>("open_retries", 5);
   open_retry_delay_s_ = declare_parameter<double>("open_retry_delay_s", 2.0);
+
+  // Backend mediapipe (ADR-018)
+  mediapipe_model_variant_ =
+    declare_parameter<std::string>("mediapipe_model_variant", "full");
+  mediapipe_model_path_ =
+    declare_parameter<std::string>("mediapipe_model_path", "");
+  mediapipe_python_ =
+    declare_parameter<std::string>("mediapipe_python", "python3");
 
   // ---- Camara (con reintentos, ADR-002) y backend ----
   openCamera();
@@ -212,7 +226,29 @@ void GaitRecorderNode::openCamera()
 void GaitRecorderNode::initBackend()
 {
   backend_ = createBackend(pose_backend_);
-  BackendConfig config{detection_model_, body_format_, confidence_threshold_};
+
+  BackendConfig config;
+  config.confidence_threshold = confidence_threshold_;
+  config.detection_model = detection_model_;
+  config.body_format = body_format_;
+  config.depth_min_m = static_cast<float>(depth_min_m_);
+  config.depth_max_m = static_cast<float>(depth_max_m_);
+
+  if (pose_backend_ == "mediapipe") {
+    const std::string share_dir =
+      ament_index_cpp::get_package_share_directory(
+      "zed_gait_analysis_recorder");
+    config.model_variant = mediapipe_model_variant_;
+    config.model_path = mediapipe_model_path_.empty() ?
+      share_dir + "/models/pose_landmarker_" + mediapipe_model_variant_ +
+      ".task" :
+      mediapipe_model_path_;
+    config.python_path = mediapipe_python_;
+    config.script_path = share_dir + "/scripts/mediapipe_worker.py";
+    RCLCPP_INFO(
+      get_logger(), "Modelo MediaPipe: %s", config.model_path.c_str());
+  }
+
   std::string error;
   if (!backend_->init(zed_, config, error)) {
     throw std::runtime_error(
@@ -253,7 +289,7 @@ void GaitRecorderNode::processFrame()
   cv::Mat img;
   cv::cvtColor(img_bgra, img, cv::COLOR_BGRA2BGR);
 
-  PoseResult result = backend_->infer(zed_, image_zed_);
+  PoseResult result = backend_->infer(zed_, img);
 
   // Una persona objetivo (resp. 40): la de mayor confianza del frame.
   const PersonPose * main_person = selectMainPerson(result);

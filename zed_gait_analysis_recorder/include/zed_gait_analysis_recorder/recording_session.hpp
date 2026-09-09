@@ -1,6 +1,7 @@
 #ifndef ZED_GAIT_ANALYSIS_RECORDER__RECORDING_SESSION_HPP_
 #define ZED_GAIT_ANALYSIS_RECORDER__RECORDING_SESSION_HPP_
 
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -88,6 +89,9 @@ private:
 
   uint64_t rows_since_flush_{0};
   uint64_t frames_since_space_check_{0};
+  // Metricas de sesion (ADR-004/016): FPS efectivos registrados al cerrar.
+  uint64_t video_frames_written_{0};
+  std::chrono::steady_clock::time_point session_start_{};
 
   std::string csv_tmp_, csv_final_;
   std::string video_tmp_, video_final_;

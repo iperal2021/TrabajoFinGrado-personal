@@ -10,11 +10,16 @@
     # Ruta a un SVO para modo simulacion; vacio = camara real.
     svo_path: ""
 
-    # Backend de pose (ADR-009). Futuros: openpose, mediapipe, yolo.
+    # Backend de pose (ADR-009/018). Disponibles: zed_sdk, mediapipe.
     pose_backend: "zed_sdk"
     body_detection_model: "HUMAN_BODY_MEDIUM"  # FAST / MEDIUM / ACCURATE
-    body_format: "BODY_34"                     # BODY_18 / BODY_34 / BODY_38
+    body_format: "BODY_38"                     # BODY_18 / BODY_34 / BODY_38
     confidence_threshold: 0.5                  # validez por joint (resp. 35)
+
+    # Backend mediapipe (ADR-018): BlazePose 33 landmarks via worker Python.
+    mediapipe_model_variant: "full"   # lite / full / heavy
+    mediapipe_model_path: ""          # vacio = share/<pkg>/models/pose_landmarker_<variant>.task
+    mediapipe_python: "python3"       # p.ej. ~/.virtualenvs/zed_dev/bin/python3
 
     # Captura (resp. 14/15/18/56).
     resolution: "HD720"

@@ -14,13 +14,15 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-import pyzed.sl as sl
 
 MAX_CAMERAS = 2
 
 
 def get_connected_serials():
+    # Import perezoso de pyzed: no hace falta en modo SVO y puede no estar
+    # instalado en el python del sistema (ros2 launch usa /usr/bin/python3).
     try:
+        import pyzed.sl as sl
         return [device.serial_number for device in sl.Camera.get_device_list()]
     except Exception as exc:  # pyzed sin SDK/camaras: se informa y se sigue
         print(f'[launcher] No se pudo enumerar camaras ZED: {exc}')

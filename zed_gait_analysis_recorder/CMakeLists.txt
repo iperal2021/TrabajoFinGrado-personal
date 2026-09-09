@@ -15,10 +15,11 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
 # ZED SDK 5.2.2 (version fijada por el plan; en zed_node_cpp se usaba 4)
@@ -40,10 +41,12 @@ add_executable(gait_recorder_node
   src/main.cpp
   src/gait_recorder_node.cpp
   src/recording_session.cpp
+  src/backends/mediapipe_backend.cpp
   src/backends/zed_body_tracking_backend.cpp
 )
 
 ament_target_dependencies(gait_recorder_node
+  ament_index_cpp
   rclcpp
   sensor_msgs
   std_msgs
@@ -64,6 +67,20 @@ install(TARGETS
 install(DIRECTORY
   launch
   config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Worker Python del backend mediapipe y utilidades (ADR-018). Los modelos
+# .task se descargan con scripts/download_models.sh y no se commitean.
+install(PROGRAMS
+  scripts/mediapipe_worker.py
+  scripts/test_mediapipe_worker.py
+  scripts/download_models.sh
+  DESTINATION share/${PROJECT_NAME}/scripts
+)
+
+install(DIRECTORY
+  models
   DESTINATION share/${PROJECT_NAME}
 )
 

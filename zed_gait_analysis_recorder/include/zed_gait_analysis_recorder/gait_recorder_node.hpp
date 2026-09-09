@@ -68,6 +68,10 @@ private:
   uint64_t min_free_space_mb_{1024};
   int open_retries_{5};
   double open_retry_delay_s_{2.0};
+  // Backend mediapipe (ADR-018)
+  std::string mediapipe_model_variant_;
+  std::string mediapipe_model_path_;
+  std::string mediapipe_python_;
 
   // ---- Estado resuelto tras abrir la camara ----
   int camera_serial_{0};

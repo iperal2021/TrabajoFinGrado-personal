@@ -65,14 +65,15 @@ bool RecordingSession::start(
     return false;
   }
 
-  // Nombres: .partial hasta el cierre correcto (ADR-005). El SVO necesita
-  // terminar en .svo2 para el SDK, asi que el .partial va antes.
+  // Nombres: .partial hasta el cierre correcto (ADR-005). El .partial va
+  // ANTES de la extension real: el backend FFmpeg de OpenCV deduce el
+  // contenedor por la extension (un ".mp4.partial" no abre).
   const std::string base =
     directory_ + "/" + config.stamp + "_" + config.camera_alias + "_pose";
   csv_final_ = base + ".csv";
-  csv_tmp_ = csv_final_ + ".partial";
+  csv_tmp_ = base + ".partial.csv";
   video_final_ = base + ".mp4";
-  video_tmp_ = video_final_ + ".partial";
+  video_tmp_ = base + ".partial.mp4";
   svo_final_ = base + ".svo2";
   svo_tmp_ = base + ".partial.svo2";
 
@@ -107,15 +108,23 @@ bool RecordingSession::start(
   if (!video_.isOpened()) {
     RCLCPP_WARN(
       kLogger,
-      "NVENC no disponible; codificando por software (mp4v). Revisar "
-      "'gst-inspect-1.0 nvv4l2h264enc'.");
+      "NVENC no disponible; codificando por software (mp4v via FFmpeg). "
+      "En la Jetson revisar 'gst-inspect-1.0 nvv4l2h264enc'.");
+    // CAP_FFMPEG explicito: con CAP_GSTREAMER el fallback muere en runtime
+    // si faltan elementos de codificacion (visto en OpenCV 4.5.4 de apt).
+    // Objeto fresco: reutilizar un VideoWriter con un open() fallido es
+    // propenso a errores.
+    video_ = cv::VideoWriter();
     video_.open(
-      video_tmp_, cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
+      video_tmp_, cv::CAP_FFMPEG, cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
       config.video_fps, config.video_size, true);
   }
   if (!video_.isOpened()) {
     RCLCPP_ERROR(kLogger, "No se pudo abrir el VideoWriter");
     csv_.close();
+    // Inicio fallido: no se deja ningun artefacto atras.
+    std::error_code ec;
+    fs::remove(csv_tmp_, ec);
     return false;
   }
 
@@ -149,6 +158,8 @@ bool RecordingSession::start(
 
   rows_since_flush_ = 0;
   frames_since_space_check_ = 0;
+  video_frames_written_ = 0;
+  session_start_ = std::chrono::steady_clock::now();
   state_ = State::RECORDING;
 
   RCLCPP_INFO(
@@ -163,6 +174,7 @@ void RecordingSession::writeFrame(const cv::Mat & bgr)
   if (state_ != State::RECORDING || !video_.isOpened()) {return;}
 
   video_.write(bgr);
+  ++video_frames_written_;
 
   // Chequeo periodico de espacio: cv::VideoWriter no reporta disco lleno.
   if (++frames_since_space_check_ >= 60) {
@@ -258,7 +270,13 @@ void RecordingSession::stop()
   state_ = State::IDLE;
 
   if (clean) {
-    RCLCPP_INFO(kLogger, "Sesion cerrada: %s", csv_final_.c_str());
+    const double elapsed_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - session_start_).count();
+    RCLCPP_INFO(
+      kLogger,
+      "Sesion cerrada: %s (%lu frames de video en %.1f s = %.1f fps "
+      "efectivos)", csv_final_.c_str(), video_frames_written_, elapsed_s,
+      elapsed_s > 0.0 ? video_frames_written_ / elapsed_s : 0.0);
   } else {
     RCLCPP_WARN(
       kLogger, "Sesion cerrada en ERROR; quedan archivos .partial");
