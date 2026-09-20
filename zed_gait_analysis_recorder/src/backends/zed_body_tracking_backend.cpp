@@ -115,9 +115,24 @@ SkeletonTopology buildTopology(sl::BODY_FORMAT format)
 
 }  // namespace
 
+
+
 bool ZedBodyTrackingBackend::init(
   sl::Camera & camera, const BackendConfig & config, std::string & error)
 {
+  sl::PositionalTrackingParameters positional_tracking_parameters;
+
+  const sl::ERROR_CODE pt_err =
+    camera.enablePositionalTracking(positional_tracking_parameters);
+
+  if (pt_err != sl::ERROR_CODE::SUCCESS) {
+    error =
+      "enablePositionalTracking fallo: " +
+      std::string(sl::toString(pt_err).c_str());
+
+    return false;
+  }
+  
   sl::BodyTrackingParameters params;
   params.enable_tracking = true;
   params.enable_body_fitting = true;
@@ -150,11 +165,13 @@ bool ZedBodyTrackingBackend::init(
 }
 
 PoseResult ZedBodyTrackingBackend::infer(
-  sl::Camera & camera, const cv::Mat & bgr)
+  sl::Camera & camera, const cv::Mat & bgr, bool need_3d)
 {
   // El backend zed_sdk obtiene los joints del propio grab(); la imagen la
-  // usan los backends externos (mediapipe, ...).
+  // usan los backends externos (mediapipe, ...). El Body Tracking siempre
+  // produce 3D (necesita la profundidad activa): need_3d no aplica.
   (void)bgr;
+  (void)need_3d;
 
   PoseResult result;
   const sl::ERROR_CODE err = camera.retrieveBodies(bodies_, runtime_);

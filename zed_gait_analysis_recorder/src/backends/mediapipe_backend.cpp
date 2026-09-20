@@ -82,13 +82,14 @@ bool MediaPipeBackend::init(
   depth_min_m_ = config.depth_min_m;
   depth_max_m_ = config.depth_max_m;
   confidence_threshold_ = config.confidence_threshold;
+  input_width_ = config.input_width;
   topology_ = buildBlazePoseTopology();
   model_id_ = "mediapipe_" + config.model_variant;
 
   socket_path_ = "/tmp/zg_mp_" + std::to_string(::getpid()) + ".sock";
 
   const std::string threshold = std::to_string(config.confidence_threshold);
-  const std::vector<std::string> args = {
+  std::vector<std::string> args = {
     config.script_path,
     "--socket", socket_path_,
     "--model", config.model_path,
@@ -96,6 +97,9 @@ bool MediaPipeBackend::init(
     "--min-pose-presence-confidence", threshold,
     "--min-tracking-confidence", threshold,
   };
+  if (config.use_gpu) {
+    args.push_back("--gpu");
+  }
   std::vector<char *> argv;
   argv.push_back(const_cast<char *>(config.python_path.c_str()));
   for (const auto & arg : args) {
@@ -247,7 +251,8 @@ void MediaPipeBackend::stopWorker()
   }
 }
 
-PoseResult MediaPipeBackend::infer(sl::Camera & camera, const cv::Mat & bgr)
+PoseResult MediaPipeBackend::infer(
+  sl::Camera & camera, const cv::Mat & bgr, bool need_3d)
 {
   PoseResult result;
   if (socket_fd_ < 0) {
@@ -264,16 +269,29 @@ PoseResult MediaPipeBackend::infer(sl::Camera & camera, const cv::Mat & bgr)
   }
   last_timestamp_ms_ = timestamp_ms;
 
+  // Reescalado previo al socket: menos bytes a transferir y menos pixeles
+  // que subir a GPU en el worker. Los landmarks son normalizados [0,1], asi
+  // que no cambia su significado; el mapeo a pixel usa el frame original.
+  cv::Mat frame = bgr;
+  if (input_width_ > 0 && bgr.cols > input_width_) {
+    const double scale =
+      static_cast<double>(input_width_) / static_cast<double>(bgr.cols);
+    cv::resize(
+      bgr, frame,
+      cv::Size(input_width_, static_cast<int>(bgr.rows * scale)), 0, 0,
+      cv::INTER_AREA);
+  }
+
   // Enviar [u32 width][u32 height][i64 timestamp_ms] + frame BGR.
-  const uint32_t width = static_cast<uint32_t>(bgr.cols);
-  const uint32_t height = static_cast<uint32_t>(bgr.rows);
+  const uint32_t width = static_cast<uint32_t>(frame.cols);
+  const uint32_t height = static_cast<uint32_t>(frame.rows);
   char header[16];
   std::memcpy(header, &width, 4);
   std::memcpy(header + 4, &height, 4);
   std::memcpy(header + 8, &timestamp_ms, 8);
   const size_t frame_bytes = static_cast<size_t>(width) * height * 3;
   if (!sendExact(header, sizeof(header)) ||
-    !sendExact(bgr.data, frame_bytes))
+    !sendExact(frame.data, frame_bytes))
   {
     workerDied("send");
     return result;
@@ -294,8 +312,11 @@ PoseResult MediaPipeBackend::infer(sl::Camera & camera, const cv::Mat & bgr)
     return result;
   }
 
-  // Profundidad del mismo grab para la back-proyeccion.
-  if (camera.retrieveMeasure(depth_map_, sl::MEASURE::DEPTH) !=
+  // Profundidad del mismo grab para la back-proyeccion. Solo si alguien
+  // consume la XYZ (grabacion): sin ella el nodo desactiva el calculo de
+  // profundidad y esta llamada fallaria (y costaria ms) por frame.
+  if (need_3d &&
+    camera.retrieveMeasure(depth_map_, sl::MEASURE::DEPTH) !=
     sl::ERROR_CODE::SUCCESS)
   {
     static rclcpp::Clock throttle_clock(RCL_STEADY_TIME);
@@ -315,16 +336,16 @@ PoseResult MediaPipeBackend::infer(sl::Camera & camera, const cv::Mat & bgr)
     joint.confidence = std::clamp(landmarks[i * 3 + 2], 0.0F, 1.0F);
     confidence_sum += joint.confidence;
 
+    // Los landmarks son normalizados: se mapean al frame ORIGINAL (bgr),
+    // que es donde se consulta la profundidad y se dibuja el esqueleto.
     const int u = std::clamp(
-      static_cast<int>(std::lround(xn * width)), 0,
-      static_cast<int>(width) - 1);
+      static_cast<int>(std::lround(xn * bgr.cols)), 0, bgr.cols - 1);
     const int v = std::clamp(
-      static_cast<int>(std::lround(yn * height)), 0,
-      static_cast<int>(height) - 1);
+      static_cast<int>(std::lround(yn * bgr.rows)), 0, bgr.rows - 1);
     joint.u = static_cast<float>(u);
     joint.v = static_cast<float>(v);
 
-    if (joint.confidence >= confidence_threshold_) {
+    if (need_3d && joint.confidence >= confidence_threshold_) {
       float x = 0.0F;
       float y = 0.0F;
       float z = 0.0F;

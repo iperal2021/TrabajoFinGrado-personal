@@ -31,6 +31,10 @@ def get_connected_serials():
 
 def launch_setup(context, *args, **kwargs):
     svo_path = LaunchConfiguration('svo_path').perform(context)
+    svo_loop = LaunchConfiguration('svo_loop').perform(context)
+    pose_backend = LaunchConfiguration('pose_backend').perform(context)
+    mp_gpu = LaunchConfiguration('mediapipe_gpu').perform(context)
+    mp_variant = LaunchConfiguration('mediapipe_model_variant').perform(context)
     serials_arg = LaunchConfiguration('camera_serials').perform(context).strip()
     config_file = LaunchConfiguration('config_file').perform(context)
 
@@ -45,6 +49,12 @@ def launch_setup(context, *args, **kwargs):
                 'camera_serial': serial,
                 'camera_alias': alias,
                 'svo_path': svo_path,
+                'svo_loop': svo_loop.lower() in ('true', '1', 'yes'),
+                **({'pose_backend': pose_backend} if pose_backend else {}),
+                **({'mediapipe_gpu': mp_gpu.lower() in ('true', '1', 'yes')}
+                   if mp_gpu else {}),
+                **({'mediapipe_model_variant': mp_variant}
+                   if mp_variant else {}),
             }],
         )
 
@@ -92,6 +102,26 @@ def generate_launch_description():
             default_value='',
             description='Ruta a un fichero SVO. Si se indica, se lanza un '
                         'unico nodo en modo simulacion.'),
+        DeclareLaunchArgument(
+            'svo_loop',
+            default_value='false',
+            description='En modo SVO, reinicia la reproduccion al llegar al '
+                        'final en lugar de cerrar el nodo (util para pruebas).'),
+        DeclareLaunchArgument(
+            'pose_backend',
+            default_value='',
+            description='Backend de pose (zed_sdk, mediapipe); vacio = el del '
+                        'fichero de configuracion.'),
+        DeclareLaunchArgument(
+            'mediapipe_gpu',
+            default_value='',
+            description='Con pose_backend:=mediapipe, true = delegado GPU '
+                        '(OpenGL ES/EGL); vacio = el del fichero de config.'),
+        DeclareLaunchArgument(
+            'mediapipe_model_variant',
+            default_value='',
+            description='Variante BlazePose (lite, full, heavy); vacio = el '
+                        'del fichero de configuracion.'),
         DeclareLaunchArgument(
             'config_file',
             default_value=default_config,

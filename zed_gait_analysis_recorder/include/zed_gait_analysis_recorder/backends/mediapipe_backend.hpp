@@ -27,7 +27,8 @@ public:
     sl::Camera & camera, const BackendConfig & config,
     std::string & error) override;
 
-  PoseResult infer(sl::Camera & camera, const cv::Mat & bgr) override;
+  PoseResult infer(
+    sl::Camera & camera, const cv::Mat & bgr, bool need_3d) override;
 
   const SkeletonTopology & topology() const override {return topology_;}
 
@@ -47,6 +48,7 @@ private:
   SkeletonTopology topology_;
   std::string model_id_{"mediapipe"};
   float confidence_threshold_{0.5F};
+  int input_width_ = 0;  // 0 = mandar el frame a resolucion original
 
   // Worker
   pid_t worker_pid_{-1};

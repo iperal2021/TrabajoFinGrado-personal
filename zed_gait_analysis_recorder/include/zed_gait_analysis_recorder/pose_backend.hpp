@@ -28,6 +28,8 @@ struct BackendConfig
   std::string model_variant{"full"};
   std::string python_path{"python3"};
   std::string script_path;
+  bool use_gpu = false;
+  int input_width = 0;  // ancho de entrada al worker; 0 = sin reescalado
   float depth_min_m{1.5F};
   float depth_max_m{10.0F};
 };
@@ -53,7 +55,11 @@ public:
 
   // bgr: imagen izquierda rectificada ya convertida (la misma que el nodo
   // dibuja y publica), para que los backends no repitan la conversion.
-  virtual PoseResult infer(sl::Camera & camera, const cv::Mat & bgr) = 0;
+  // need_3d = false permite al backend saltarse el calculo de XYZ (p.ej.
+  // profundidad) cuando nadie lo consume (sin grabacion). Los backends que
+  // siempre producen 3D (zed_sdk) lo ignoran.
+  virtual PoseResult infer(
+    sl::Camera & camera, const cv::Mat & bgr, bool need_3d = true) = 0;
 
   virtual const SkeletonTopology & topology() const = 0;
 

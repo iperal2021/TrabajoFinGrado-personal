@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gait Analysis Monitor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1.3.0/build/roslib.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:        #1A6FC4;
+    --blue-light:  #EBF3FC;
+    --red:         #C0392B;
+    --red-light:   #FDECEA;
+    --green:       #1A7F5A;
+    --green-light: #E6F5EF;
+    --g50:  #F8F9FA; --g100: #F1F3F5; --g200: #E9ECEF;
+    --g300: #DEE2E6; --g400: #CED4DA; --g500: #ADB5BD;
+    --g600: #6C757D; --g700: #495057; --g800: #343A40; --g900: #212529;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+    --r: 8px; --rl: 12px;
+  }
+
+  body { font-family: var(--font); background: var(--g50); color: var(--g900); min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* -- Header -- */
+  header {
+    background: #fff; border-bottom: 1px solid var(--g200);
+    padding: 0 32px; height: 64px;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .h-left { display: flex; align-items: center; gap: 14px; }
+  .logo {
+    width: 36px; height: 36px; background: var(--blue);
+    border-radius: var(--r); display: flex; align-items: center; justify-content: center;
+  }
+  .logo svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .h-title { font-size: 16px; font-weight: 600; }
+  .h-sub   { font-size: 12px; color: var(--g500); font-family: var(--mono); margin-top: 1px; }
+  .h-right { display: flex; align-items: center; gap: 18px; }
+
+  .conn-pill {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border-radius: 99px;
+    border: 1px solid var(--g200); background: var(--g50);
+    cursor: pointer; transition: border-color .15s;
+  }
+  .conn-pill:hover { border-color: var(--blue); }
+  .conn-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--g400); flex-shrink: 0;
+    transition: background .3s;
+  }
+  .conn-dot.connected  { background: var(--green); box-shadow: 0 0 0 2px var(--green-light); }
+  .conn-dot.connecting { background: #E8A838; box-shadow: 0 0 0 2px #FEF3E2; animation: blink 1s infinite; }
+  .conn-dot.error      { background: var(--red);  box-shadow: 0 0 0 2px var(--red-light); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  .btn-scan {
+    font-family: var(--font); font-size: 13px; font-weight: 500;
+    padding: 7px 15px; border-radius: var(--r);
+    border: 1px solid var(--blue); background: var(--blue-light); color: var(--blue);
+    cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background .15s;
+  }
+  .btn-scan:hover { background: #d4e8f8; }
+  .btn-scan:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-scan svg { width: 15px; height: 15px; stroke: var(--blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .rec-pill {
+    display: none; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 600; color: var(--red);
+    padding: 5px 12px; background: var(--red-light); border-radius: 99px;
+  }
+  .rec-pill.show { display: flex; }
+  .rec-pill .reddot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; }
+
+  .clock { font-family: var(--mono); font-size: 12px; color: var(--g500); }
+
+  /* -- Main -- */
+  main {
+    flex: 1; padding: 28px 32px;
+    display: flex; flex-direction: column; gap: 24px;
+    max-width: 1600px; width: 100%; margin: 0 auto;
+  }
+
+  /* -- Empty state -- */
+  #state-panel {
+    flex: 1; min-height: 300px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    color: var(--g500); text-align: center;
+  }
+  #state-panel svg { width: 48px; height: 48px; stroke: var(--g300); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  #state-panel p { font-size: 15px; }
+  #state-panel small { font-size: 13px; color: var(--g400); }
+
+  /* -- Camera grid -- */
+  #cam-grid {
+    display: none;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  #cam-grid.one { display: grid; grid-template-columns: 1fr; max-width: 760px; }
+  #cam-grid.two,
+  #cam-grid.many { display: grid; }
+
+  .cam-card {
+    background: #fff; border: 1px solid var(--g200);
+    border-radius: var(--rl); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .cam-card-header {
+    padding: 10px 14px; border-bottom: 1px solid var(--g100);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .cam-name {
+    font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--g700);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .cam-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g300); transition: background .3s; flex-shrink: 0; }
+  .cam-live-dot.on { background: var(--green); }
+  .cam-topic { font-size: 11px; color: var(--g400); font-weight: 400; }
+
+  .cam-badge { font-size: 11px; font-weight: 500; padding: 2px 9px; border-radius: 99px; background: var(--g100); color: var(--g500); }
+  .cam-badge.live { background: var(--green-light); color: var(--green); }
+  .cam-badge.rec  { background: var(--red-light); color: var(--red); display: flex; align-items: center; gap: 5px; }
+  .cam-badge.rec .rdot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; flex-shrink: 0; }
+
+  /* Image container */
+  .cam-view {
+    position: relative; background: #0d0d0d; aspect-ratio: 16/9; overflow: hidden;
+  }
+  .cam-view img {
+    width: 100%; height: 100%; display: block; object-fit: contain;
+  }
+  .cam-waiting {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    color: var(--g600); font-size: 13px;
+  }
+  .cam-waiting svg { width: 30px; height: 30px; stroke: var(--g700); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .cam-fps {
+    position: absolute; bottom: 8px; right: 10px;
+    font-family: var(--mono); font-size: 11px;
+    color: rgba(255,255,255,.6); background: rgba(0,0,0,.4);
+    padding: 2px 7px; border-radius: 4px; display: none;
+  }
+
+  /* -- Recording panel -- */
+  #rec-panel {
+    display: none;
+    background: #fff; border: 1px solid var(--g200); border-radius: var(--rl); overflow: hidden;
+  }
+
+  .global-row {
+    display: flex; align-items: center; gap: 20px;
+    padding: 16px 20px; border-bottom: 1px solid var(--g100);
+  }
+  .global-label { font-size: 14px; font-weight: 500; color: var(--g700); flex: 1; }
+  .global-label small { display: block; font-size: 12px; font-weight: 400; color: var(--g500); margin-top: 2px; }
+
+  .btn-rec {
+    font-family: var(--font); font-size: 14px; font-weight: 600;
+    padding: 10px 24px; border-radius: var(--r); border: none;
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; transition: background .15s, transform .1s; white-space: nowrap;
+  }
+  .btn-rec:active { transform: scale(.97); }
+  .btn-rec.start { background: var(--blue); color: #fff; }
+  .btn-rec.start:hover { background: #155ea8; }
+  .btn-rec.stop  { background: var(--red);  color: #fff; }
+  .btn-rec.stop:hover  { background: #a32b22; }
+
+  .expand-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 20px; cursor: pointer; user-select: none;
+  }
+  .expand-row:hover { background: var(--g50); }
+  .expand-title { font-size: 13px; font-weight: 600; color: var(--g700); display: flex; align-items: center; gap: 9px; }
+  .expand-title svg { width: 16px; height: 16px; stroke: var(--blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chevron { width: 17px; height: 17px; stroke: var(--g400); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s; }
+  .chevron.open { transform: rotate(180deg); }
+
+  .individual-panel { display: none; padding: 0 20px 16px; }
+  .individual-panel.open { display: block; }
+  .ind-label { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--g400); margin-bottom: 10px; }
+
+  .ind-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; border: 1px solid var(--g200); border-radius: var(--r); margin-bottom: 8px;
+  }
+  .ind-row:last-child { margin-bottom: 0; }
+  .ind-name  { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--g800); }
+  .ind-state { font-size: 12px; color: var(--g500); margin-top: 2px; }
+  .ind-btns  { display: flex; gap: 8px; }
+
+  .btn-sm {
+    font-family: var(--font); font-size: 12px; font-weight: 500;
+    padding: 5px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; transition: background .12s;
+  }
+  .btn-sm.start { background: var(--blue-light); color: var(--blue); border-color: #bcd9f5; }
+  .btn-sm.start:hover { background: #d0e8f8; }
+  .btn-sm.stop  { background: var(--red-light);  color: var(--red);  border-color: #f5c6c2; }
+  .btn-sm.stop:hover  { background: #f7d5d3; }
+  .btn-sm:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* -- Modal -- */
+  .modal-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(33,37,41,.5); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal-box {
+    background: #fff; border-radius: var(--rl); padding: 28px; width: 390px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.15);
+  }
+  .modal-box h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  .modal-box p  { font-size: 13px; color: var(--g600); line-height: 1.5; margin-bottom: 20px; }
+  .modal-box label { font-size: 13px; font-weight: 500; color: var(--g700); display: block; margin-bottom: 6px; }
+  .modal-box input {
+    font-family: var(--mono); font-size: 13px; width: 100%;
+    padding: 9px 12px; border: 1px solid var(--g300); border-radius: var(--r);
+    outline: none; color: var(--g900); margin-bottom: 14px;
+  }
+  .modal-box input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(26,111,196,.12); }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .btn-cancel { font-family: var(--font); font-size: 13px; font-weight: 500; padding: 8px 18px; border-radius: var(--r); border: 1px solid var(--g300); background: #fff; color: var(--g700); cursor: pointer; }
+  .btn-ok     { font-family: var(--font); font-size: 13px; font-weight: 600; padding: 8px 18px; border-radius: var(--r); border: none; background: var(--blue); color: #fff; cursor: pointer; }
+  .btn-ok:hover { background: #155ea8; }
+
+  /* -- Toast -- */
+  #toast {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    background: var(--g900); color: #fff; font-size: 13px; font-weight: 500;
+    padding: 10px 20px; border-radius: 99px;
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 200; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="h-left">
+    <div class="logo">
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="4"/>
+        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        <path d="M19 8h2M3 8H1M12 3V1"/>
+      </svg>
+    </div>
+    <div>
+      <div class="h-title">Gait Analysis Monitor</div>
+      <div class="h-sub">ROS2 · Skeleton Tracking · ZED Camera Array</div>
+    </div>
+  </div>
+  <div class="h-right">
+    <div class="rec-pill" id="rec-pill"><span class="reddot"></span> REC</div>
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="conn-pill" onclick="openModal()">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-label">Sin conexión</span>
+    </div>
+    <button class="btn-scan" id="btn-scan" onclick="scanCameras()" disabled>
+      <svg viewBox="0 0 24 24">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <rect x="7" y="7" width="10" height="10" rx="2"/>
+      </svg>
+      Escanear cámaras
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="state-panel">
+    <svg viewBox="0 0 24 24">
+      <path d="M12 22C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10z"/>
+      <path d="M12 8v4M12 16h.01"/>
+    </svg>
+    <p>Sin conexión a ROS2</p>
+    <small>Haz clic en "Sin conexión" para configurar el host de rosbridge</small>
+  </div>
+
+  <div id="cam-grid"></div>
+
+  <div id="rec-panel">
+    <div class="global-row">
+      <div class="global-label">
+        Grabación global
+        <small>Orden única en /gait_record — inicia/detiene todas las cámaras a la vez</small>
+      </div>
+      <button class="btn-rec start" id="btn-global-rec" onclick="globalRecord(true)">
+        <svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:white;stroke:none"><circle cx="12" cy="12" r="6"/></svg>
+        Iniciar grabación
+      </button>
+    </div>
+  </div>
+</main>
+
+<!-- Modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal-box">
+    <h2>Conexión rosbridge</h2>
+    <p>Introduce la dirección del servidor rosbridge WebSocket que corre en la misma máquina que ROS2.</p>
+    <label>Host / IP</label>
+    <input type="text" id="m-host" value="localhost" placeholder="192.168.1.100"/>
+    <label>Puerto</label>
+    <input type="text" id="m-port" value="9090" placeholder="9090"/>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-ok" onclick="connect()">Conectar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// -- Global state ----------------------------------------------------------
+let ros = null;
+let cameras = [];          // { idx, prefix, name, topic_img, topic_state, sub, subState, recording, fc, fpsT }
+let globalRecording = false;
+
+// -- Clock -----------------------------------------------------------------
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}, 1000);
+
+// -- Modal -----------------------------------------------------------------
+function openModal()  { document.getElementById('modal-bg').classList.add('open'); }
+function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
+
+document.getElementById('modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-bg')) closeModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('modal-bg').classList.contains('open')) connect();
+});
+
+// -- Connection ------------------------------------------------------------
+function setConn(state, label) {
+  document.getElementById('conn-dot').className   = 'conn-dot ' + state;
+  document.getElementById('conn-label').textContent = label;
+  document.getElementById('btn-scan').disabled    = (state !== 'connected');
+}
+
+function connect() {
+  const host = document.getElementById('m-host').value.trim() || 'localhost';
+  const port = document.getElementById('m-port').value.trim() || '9090';
+  closeModal();
+  if (ros) { try { ros.close(); } catch(e) {} }
+  setConn('connecting', 'Conectando');
+  ros = new ROSLIB.Ros({ url: `ws://${host}:${port}` });
+  ros.on('connection', () => { setConn('connected', `${host}:${port}`); toast('Conectado'); scanCameras(); });
+  ros.on('error',      () => { setConn('error', 'Error de conexión'); toast('No se pudo conectar'); });
+  ros.on('close',      () => { setConn('', 'Sin conexión'); clearAll(); });
+}
+
+// -- Scan ------------------------------------------------------------------
+function scanCameras() {
+  if (!ros) return;
+  toast('Buscando cámaras');
+  clearAll();
+
+  const svc = new ROSLIB.Service({ ros, name: '/rosapi/topics', serviceType: 'rosapi/Topics' });
+  svc.callService(new ROSLIB.ServiceRequest(), result => {
+    const topics = result.topics || [];
+    const found = new Set();
+    const re = /^(\/[^/]+)\/image_annotated\/compressed$/;
+    topics.forEach(t => { const m = t.match(re); if (m) found.add(m[1]); });
+
+    if (found.size === 0) {
+      setState('No se encontraron tópicos /*/image_annotated/compressed');
+      return;
+    }
+    Array.from(found).sort().forEach(addCamera);
+    showCameras();
+  }, () => {
+    toast('rosapi no disponible  probando /zed directamente');
+    addCamera('/zed');
+    showCameras();
+  });
+}
+
+function clearAll() {
+  cameras.forEach(c => { try { c.sub.unsubscribe(); } catch(e) {} try { c.subState.unsubscribe(); } catch(e) {} });
+  cameras = [];
+  document.getElementById('cam-grid').innerHTML      = '';
+  document.getElementById('cam-grid').className      = '';
+  document.getElementById('cam-grid').style.display  = 'none';
+  document.getElementById('rec-panel').style.display = 'none';
+  setState('Sin conexión a ROS2');
+}
+
+function setState(msg) {
+  document.getElementById('state-panel').style.display = 'flex';
+  document.getElementById('state-panel').querySelector('p').textContent = msg;
+}
+
+function showCameras() {
+  document.getElementById('state-panel').style.display  = 'none';
+  const grid = document.getElementById('cam-grid');
+  grid.style.display = 'grid';
+  // CSS class drives columns: one = 1 col, two/many = 2 cols
+  grid.className = cameras.length === 1 ? 'one' : 'many';
+  document.getElementById('rec-panel').style.display = 'block';
+}
+
+// -- Add camera card + subscribe -------------------------------------------
+function addCamera(prefix) {
+  const idx  = cameras.length;
+  const name = prefix.replace(/^\//, '');
+  const topic_img   = `${prefix}/image_annotated/compressed`;
+  const topic_state = `${prefix}/recording_state`;
+
+  const cam = { idx, prefix, name, topic_img, topic_state, sub: null, subState: null, recording: false, fc: 0, fpsT: Date.now() };
+  cameras.push(cam);
+
+  // Build card HTML
+  const grid = document.getElementById('cam-grid');
+  const card = document.createElement('div');
+  card.className = 'cam-card';
+  card.id = `card-${idx}`;
+  card.innerHTML = `
+    <div class="cam-card-header">
+      <div class="cam-name">
+        <div class="cam-live-dot" id="dot-${idx}"></div>
+        ${name}
+        <span class="cam-topic">${topic_img}</span>
+      </div>
+      <div class="cam-badge" id="badge-${idx}">En espera</div>
+    </div>
+    <div class="cam-view">
+      <img id="img-${idx}" alt=""/>
+      <div class="cam-waiting" id="wait-${idx}">
+        <svg viewBox="0 0 24 24">
+          <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.889L15 14"/>
+          <rect x="3" y="6" width="12" height="12" rx="2"/>
+        </svg>
+        Esperando imagen
+      </div>
+      <div class="cam-fps" id="fps-${idx}"></div>
+    </div>`;
+  grid.appendChild(card);
+
+  // -- Subscribe to CompressedImage --------------------------------------
+  // msg.data arrives from rosbridge as a base64 string.
+  // We set it directly as img.src  no decoding loop, no canvas.
+  const sub = new ROSLIB.Topic({
+    ros,
+    name: topic_img,
+    messageType: 'sensor_msgs/msg/CompressedImage',
+    throttle_rate: 10,   // cap at ~15 fps
+    queue_length: 1,     // drop backlog, always show latest
+  });
+
+  sub.subscribe(msg => {
+    const imgEl = document.getElementById(`img-${cam.idx}`);
+    const wait  = document.getElementById(`wait-${cam.idx}`);
+    if (!imgEl) return;
+
+    // First frame: hide the waiting overlay
+    if (wait && wait.style.display !== 'none') {
+      wait.style.display = 'none';
+      document.getElementById(`dot-${cam.idx}`).classList.add('on');
+      if (!cam.recording) setBadge(cam.idx, 'live');
+    }
+
+    // Set image  rosbridge always sends msg.data as base64
+    // msg.format is typically "jpeg" or "png"
+    imgEl.src = 'data:image/' + (msg.format || 'jpeg') + ';base64,' + msg.data;
+
+    // FPS counter
+    cam.fc++;
+    const now = Date.now(), elapsed = now - cam.fpsT;
+    if (elapsed >= 1000) {
+      const fps = Math.round(cam.fc * 1000 / elapsed);
+      cam.fc = 0; cam.fpsT = now;
+      const fpsEl = document.getElementById(`fps-${cam.idx}`);
+      if (fpsEl) { fpsEl.style.display = 'block'; fpsEl.textContent = fps + ' fps'; }
+    }
+  });
+
+  cam.sub = sub;
+
+  // -- Suscripción al estado de grabación (Bool, feedback real del nodo) ---
+  const subState = new ROSLIB.Topic({
+    ros,
+    name: topic_state,
+    messageType: 'std_msgs/msg/Bool',
+    queue_length: 1,
+  });
+  subState.subscribe(msg => updateCamState(cam.idx, msg.data));
+  cam.subState = subState;
+}
+
+// -- Badge helper ----------------------------------------------------------
+function setBadge(idx, state) {
+  const b = document.getElementById(`badge-${idx}`);
+  if (!b) return;
+  if (state === 'live') { b.className = 'cam-badge live'; b.textContent = 'En vivo'; }
+  else if (state === 'rec') { b.className = 'cam-badge rec'; b.innerHTML = '<span class="rdot"></span> Grabando'; }
+  else { b.className = 'cam-badge'; b.textContent = 'En espera'; }
+}
+
+// -- Publishing ------------------------------------------------------------
+function pub(topicName, value) {
+  const t = new ROSLIB.Topic({ ros, name: topicName, messageType: 'std_msgs/msg/Bool' });
+  t.publish(new ROSLIB.Message({ data: value }));
+  setTimeout(() => t.unadvertise(), 600);
+}
+
+// -- Estado por cámara (feedback desde /<alias>/recording_state) -----------
+function updateCamState(idx, active) {
+  const cam = cameras[idx];
+  if (!cam) return;
+  cam.recording = active;
+  setBadge(idx, active ? 'rec' : 'live');
+  if (!cameras.some(c => c.recording)) document.getElementById('rec-pill').classList.remove('show');
+  else document.getElementById('rec-pill').classList.add('show');
+}
+
+// -- Global recording ------------------------------------------------------
+// zed_gait_analysis_recorder: una orden Bool en /gait_record controla TODAS
+// las cámaras; no hay control individual por tópico.
+function globalRecord(active) {
+  globalRecording = active;
+  const btn = document.getElementById('btn-global-rec');
+  if (active) {
+    btn.className = 'btn-rec stop';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:white;stroke:none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Detener grabación';
+    btn.onclick = () => globalRecord(false);
+  } else {
+    btn.className = 'btn-rec start';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:13px;height:13px;fill:white;stroke:none"><circle cx="12" cy="12" r="6"/></svg> Iniciar grabación';
+    btn.onclick = () => globalRecord(true);
+  }
+  pub('/gait_record', active);
+  toast(active ? 'Orden de grabación enviada a todas las cámaras' : 'Orden de parada enviada');
+}
+
+// -- Toast -----------------------------------------------------------------
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// -- Init ------------------------------------------------------------------
+window.addEventListener('DOMContentLoaded', openModal);
+</script>
+</body>
+</html>

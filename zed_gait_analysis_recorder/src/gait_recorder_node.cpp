@@ -92,6 +92,7 @@ GaitRecorderNode::GaitRecorderNode()
     static_cast<int>(declare_parameter<int64_t>("camera_serial", 0));
   camera_alias_ = declare_parameter<std::string>("camera_alias", "");
   svo_path_ = declare_parameter<std::string>("svo_path", "");
+  svo_loop_ = declare_parameter<bool>("svo_loop", false);
   pose_backend_ = declare_parameter<std::string>("pose_backend", "zed_sdk");
   detection_model_ = declare_parameter<std::string>(
     "body_detection_model", "HUMAN_BODY_MEDIUM");
@@ -125,6 +126,9 @@ GaitRecorderNode::GaitRecorderNode()
     declare_parameter<std::string>("mediapipe_model_path", "");
   mediapipe_python_ =
     declare_parameter<std::string>("mediapipe_python", "python3");
+  mediapipe_gpu_ = declare_parameter<bool>("mediapipe_gpu", false);
+  mediapipe_input_width_ =
+    declare_parameter<int>("mediapipe_input_width", 640);
 
   // ---- Camara (con reintentos, ADR-002) y backend ----
   openCamera();
@@ -245,6 +249,8 @@ void GaitRecorderNode::initBackend()
       mediapipe_model_path_;
     config.python_path = mediapipe_python_;
     config.script_path = share_dir + "/scripts/mediapipe_worker.py";
+    config.use_gpu = mediapipe_gpu_;
+    config.input_width = mediapipe_input_width_;
     RCLCPP_INFO(
       get_logger(), "Modelo MediaPipe: %s", config.model_path.c_str());
   }
@@ -256,6 +262,15 @@ void GaitRecorderNode::initBackend()
   }
   topology_ = backend_->topology();
   model_id_ = backend_->modelId();
+  runtime_params_.enable_depth = backendNeedsDepth();
+}
+
+bool GaitRecorderNode::backendNeedsDepth() const
+{
+  // zed_sdk: el Body Tracking 3D necesita la profundidad en cada grab.
+  // mediapipe: los landmarks son 2D; la profundidad solo se usa para la
+  // XYZ del CSV, es decir, grabando (se reactiva en startRecording).
+  return pose_backend_ != "mediapipe";
 }
 
 // ---------------------------------------------------------------------------
@@ -264,9 +279,20 @@ void GaitRecorderNode::initBackend()
 // ---------------------------------------------------------------------------
 void GaitRecorderNode::processFrame()
 {
-  const sl::ERROR_CODE grab_state = zed_.grab();
+  // Profiling ligero (diagnostico de rendimiento): medias por etapa cada 5 s.
+  static auto prof_t0 = std::chrono::steady_clock::now();
+  static double acc_grab = 0, acc_prep = 0, acc_infer = 0, acc_post = 0;
+  static int prof_n = 0;
+  const auto tp0 = std::chrono::steady_clock::now();
+
+  const sl::ERROR_CODE grab_state = zed_.grab(runtime_params_);
 
   if (grab_state == sl::ERROR_CODE::END_OF_SVOFILE_REACHED) {
+    if (svo_loop_) {
+      RCLCPP_INFO(get_logger(), "Fin del SVO. Reiniciando reproduccion.");
+      zed_.setSVOPosition(0);
+      return;
+    }
     RCLCPP_INFO(get_logger(), "Fin del SVO. Cerrando grabacion y nodo.");
     stopRecording();
     rclcpp::shutdown();
@@ -279,6 +305,7 @@ void GaitRecorderNode::processFrame()
     return;
   }
 
+  const auto tp1 = std::chrono::steady_clock::now();
   zed_.retrieveImage(image_zed_, sl::VIEW::LEFT);
 
   // sl::Mat -> cv::Mat compartiendo memoria (sin copia).
@@ -289,7 +316,10 @@ void GaitRecorderNode::processFrame()
   cv::Mat img;
   cv::cvtColor(img_bgra, img, cv::COLOR_BGRA2BGR);
 
-  PoseResult result = backend_->infer(zed_, img);
+  const auto tp2 = std::chrono::steady_clock::now();
+  PoseResult result = backend_->infer(
+    zed_, img, session_.state() == RecordingSession::State::RECORDING);
+  const auto tp3 = std::chrono::steady_clock::now();
 
   // Una persona objetivo (resp. 40): la de mayor confianza del frame.
   const PersonPose * main_person = selectMainPerson(result);
@@ -325,6 +355,23 @@ void GaitRecorderNode::processFrame()
     {
       publishState(false);
     }
+  }
+
+  const auto tp4 = std::chrono::steady_clock::now();
+  acc_grab += std::chrono::duration<double, std::milli>(tp1 - tp0).count();
+  acc_prep += std::chrono::duration<double, std::milli>(tp2 - tp1).count();
+  acc_infer += std::chrono::duration<double, std::milli>(tp3 - tp2).count();
+  acc_post += std::chrono::duration<double, std::milli>(tp4 - tp3).count();
+  if (++prof_n >= 60) {
+    const double total = acc_grab + acc_prep + acc_infer + acc_post;
+    RCLCPP_INFO(
+      get_logger(),
+      "[prof] ms/frame: grab=%.1f prep=%.1f infer=%.1f post=%.1f total=%.1f",
+      acc_grab / prof_n, acc_prep / prof_n, acc_infer / prof_n,
+      acc_post / prof_n, total / prof_n);
+    prof_n = 0;
+    acc_grab = acc_prep = acc_infer = acc_post = 0;
+    prof_t0 = tp4;
   }
 }
 
@@ -461,6 +508,7 @@ void GaitRecorderNode::startRecording()
   config.min_free_space_mb = min_free_space_mb_;
 
   if (session_.start(config, zed_, topology_)) {
+    runtime_params_.enable_depth = true;  // el CSV necesita XYZ
     publishState(true);
     RCLCPP_INFO(get_logger(), "[%s] Grabacion iniciada", camera_alias_.c_str());
   } else {
@@ -478,6 +526,8 @@ void GaitRecorderNode::stopRecording()
   }
   session_.stop();
   publishState(false);
+  // Sin grabacion, la profundidad solo hace falta si el backend la usa.
+  runtime_params_.enable_depth = backendNeedsDepth();
   RCLCPP_INFO(get_logger(), "[%s] Grabacion detenida", camera_alias_.c_str());
 }
 

@@ -30,6 +30,7 @@ public:
 private:
   void openCamera();
   void initBackend();
+  bool backendNeedsDepth() const;
   void processFrame();
 
   void cbRecord(const std_msgs::msg::Bool::SharedPtr msg);
@@ -47,6 +48,7 @@ private:
   int camera_serial_param_{0};
   std::string camera_alias_;
   std::string svo_path_;
+  bool svo_loop_ = false;
   std::string pose_backend_;
   std::string detection_model_;
   std::string body_format_;
@@ -72,6 +74,8 @@ private:
   std::string mediapipe_model_variant_;
   std::string mediapipe_model_path_;
   std::string mediapipe_python_;
+  bool mediapipe_gpu_ = false;
+  int mediapipe_input_width_ = 640;
 
   // ---- Estado resuelto tras abrir la camara ----
   int camera_serial_{0};
@@ -87,6 +91,9 @@ private:
   // ---- ZED SDK + backend ----
   sl::Camera zed_;
   sl::Mat image_zed_;
+  // enable_depth se apaga cuando el backend no lo necesita (mediapipe sin
+  // grabacion): la red de profundidad cuesta ~10 ms por grab.
+  sl::RuntimeParameters runtime_params_;
   std::unique_ptr<PoseBackend> backend_;
   SkeletonTopology topology_;
   std::string model_id_;

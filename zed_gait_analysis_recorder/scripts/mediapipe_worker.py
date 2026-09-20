@@ -48,14 +48,20 @@ def main():
     parser.add_argument('--min-pose-presence-confidence', type=float,
                         default=0.5)
     parser.add_argument('--min-tracking-confidence', type=float, default=0.5)
+    parser.add_argument('--gpu', action='store_true',
+                        help='Delegado GPU (OpenGL ES/EGL); por defecto CPU')
     args = parser.parse_args()
 
     import numpy as np
+    import cv2
     import mediapipe as mp
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision
 
-    base = mp_python.BaseOptions(model_asset_path=args.model)
+    base = mp_python.BaseOptions(
+        model_asset_path=args.model,
+        delegate=(mp_python.BaseOptions.Delegate.GPU if args.gpu
+                  else mp_python.BaseOptions.Delegate.CPU))
     options = vision.PoseLandmarkerOptions(
         base_options=base,
         running_mode=vision.RunningMode.VIDEO,
@@ -81,7 +87,11 @@ def main():
     conn.sendall(HANDSHAKE.pack(MAGIC, VERSION))
     print('[mediapipe_worker] Cliente conectado', flush=True)
 
+    import time
+    prof_n, prof_t = 0, [0.0, 0.0, 0.0]  # recv, conversion, inferencia
+
     while True:
+        t0 = time.perf_counter()
         header = recv_exact(conn, HEADER.size)
         if header is None:
             break
@@ -89,12 +99,26 @@ def main():
         frame = recv_exact(conn, width * height * 3)
         if frame is None:
             break
+        t1 = time.perf_counter()
 
         bgr = np.frombuffer(frame, dtype=np.uint8).reshape((height, width, 3))
         # BGR -> RGB es obligatorio antes de mp.Image (guia, seccion 8.2).
-        rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+        # cv2 (SIMD) tarda ~2 ms; el flip de numpy tardaba ~28 ms a 720p.
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        t2 = time.perf_counter()
+
         result = landmarker.detect_for_video(mp_image, timestamp_ms)
+        t3 = time.perf_counter()
+        prof_n += 1
+        prof_t[0] += t1 - t0
+        prof_t[1] += t2 - t1
+        prof_t[2] += t3 - t2
+        if prof_n == 60:
+            print(f'[mediapipe_worker] ms/frame: recv={prof_t[0]/60*1e3:.1f} '
+                  f'rgb={prof_t[1]/60*1e3:.1f} infer={prof_t[2]/60*1e3:.1f}',
+                  flush=True)
+            prof_n, prof_t = 0, [0.0, 0.0, 0.0]
 
         if not result.pose_landmarks:
             conn.sendall(COUNT.pack(0))

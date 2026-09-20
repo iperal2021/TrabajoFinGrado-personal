@@ -16,7 +16,8 @@ public:
     sl::Camera & camera, const BackendConfig & config,
     std::string & error) override;
 
-  PoseResult infer(sl::Camera & camera, const cv::Mat & bgr) override;
+  PoseResult infer(
+    sl::Camera & camera, const cv::Mat & bgr, bool need_3d) override;
 
   const SkeletonTopology & topology() const override {return topology_;}
 
