@@ -92,10 +92,15 @@ bool RecordingSession::start(
   csv_ << ",body_id,ai_model,camera_sn\n";
 
   // ---- Video: NVENC via GStreamer, fallback a software (ADR-004) ----
+  // Desactivado por defecto: el CSV es el producto; el video es opcional.
+  if (config.video_enabled) {
+  // nvvidconv convierte BGR->I420 en hardware (NVMM); videoconvert lo hacia
+  // en CPU y era el cuello del MP4 en la Jetson. Si nvvidconv no existe
+  // (PC de desarrollo), el open() falla y se cae al fallback software.
   if (config.video_hw_encoder) {
     const std::string pipeline =
-      "appsrc ! videoconvert ! video/x-raw,format=I420 ! nvv4l2h264enc "
-      "bitrate=" + std::to_string(config.video_bitrate) +
+      "appsrc ! nvvidconv ! video/x-raw(memory:NVMM),format=I420 ! "
+      "nvv4l2h264enc bitrate=" + std::to_string(config.video_bitrate) +
       " insert-sps-pps=true ! h264parse ! mp4mux ! filesink location=" +
       video_tmp_;
     video_.open(
@@ -127,6 +132,7 @@ bool RecordingSession::start(
     fs::remove(csv_tmp_, ec);
     return false;
   }
+  }  // video_enabled
 
   // ---- SVO nativo (imagen 2D + profundidad) ----
   if (config.svo_enabled) {
@@ -163,9 +169,8 @@ bool RecordingSession::start(
   state_ = State::RECORDING;
 
   RCLCPP_INFO(
-    kLogger, "Sesion iniciada: %s [.csv/.mp4%s] (video %dx%d @ %.0f fps)",
-    base.c_str(), svo_active_ ? "/.svo2" : "", config.video_size.width,
-    config.video_size.height, config.video_fps);
+    kLogger, "Sesion iniciada: %s [.csv%s%s]", base.c_str(),
+    config.video_enabled ? "/.mp4" : "", svo_active_ ? "/.svo2" : "");
   return true;
 }
 
@@ -214,6 +219,10 @@ void RecordingSession::writeRow(
   if (++rows_since_flush_ >= 20) {
     csv_.flush();
     rows_since_flush_ = 0;
+    // Sin video, el chequeo de espacio de writeFrame no corre: se hace aqui.
+    if (!video_.isOpened() && !hasFreeSpace()) {
+      fail("Disco casi lleno: se detiene la sesion");
+    }
   }
   if (!csv_.good()) {
     fail("Escritura de CSV fallida (¿disco lleno?)");
@@ -272,11 +281,17 @@ void RecordingSession::stop()
   if (clean) {
     const double elapsed_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - session_start_).count();
-    RCLCPP_INFO(
-      kLogger,
-      "Sesion cerrada: %s (%lu frames de video en %.1f s = %.1f fps "
-      "efectivos)", csv_final_.c_str(), video_frames_written_, elapsed_s,
-      elapsed_s > 0.0 ? video_frames_written_ / elapsed_s : 0.0);
+    if (video_frames_written_ > 0) {
+      RCLCPP_INFO(
+        kLogger,
+        "Sesion cerrada: %s (%lu frames de video en %.1f s = %.1f fps "
+        "efectivos)", csv_final_.c_str(), video_frames_written_, elapsed_s,
+        elapsed_s > 0.0 ? video_frames_written_ / elapsed_s : 0.0);
+    } else {
+      RCLCPP_INFO(
+        kLogger, "Sesion cerrada: %s (%.1f s)", csv_final_.c_str(),
+        elapsed_s);
+    }
   } else {
     RCLCPP_WARN(
       kLogger, "Sesion cerrada en ERROR; quedan archivos .partial");

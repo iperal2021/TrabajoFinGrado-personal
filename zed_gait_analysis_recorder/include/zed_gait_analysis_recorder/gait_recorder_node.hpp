@@ -63,9 +63,10 @@ private:
   std::string record_topic_;
   std::string recording_directory_;
   double csv_sample_period_s_{0.05};
+  bool video_recording_{false};
   bool video_hw_encoder_{true};
   int video_bitrate_{4000000};
-  bool svo_recording_{true};
+  bool svo_recording_{false};
   std::string svo_compression_;
   uint64_t min_free_space_mb_{1024};
   int open_retries_{5};

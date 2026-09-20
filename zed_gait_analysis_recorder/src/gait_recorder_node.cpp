@@ -110,9 +110,13 @@ GaitRecorderNode::GaitRecorderNode()
   recording_directory_ = declare_parameter<std::string>(
     "recording_directory", "~/Documents/ZED");
   csv_sample_period_s_ = declare_parameter<double>("csv_sample_period_s", 0.05);
+  // El producto es el CSV de joints: video y SVO son opcionales y OFF por
+  // defecto (codificar video/SVO por frame baja los FPS de captura, que es
+  // justo lo que no se quiere durante la grabacion de datos).
+  video_recording_ = declare_parameter<bool>("video_recording", false);
   video_hw_encoder_ = declare_parameter<bool>("video_hw_encoder", true);
   video_bitrate_ = declare_parameter<int>("video_bitrate", 4000000);
-  svo_recording_ = declare_parameter<bool>("svo_recording", true);
+  svo_recording_ = declare_parameter<bool>("svo_recording", false);
   svo_compression_ = declare_parameter<std::string>("svo_compression", "H265");
   min_free_space_mb_ = static_cast<uint64_t>(
     declare_parameter<int64_t>("min_free_space_mb", 1024));
@@ -436,6 +440,9 @@ void GaitRecorderNode::drawSkeleton(
 
 void GaitRecorderNode::publishCompressed(const cv::Mat & img)
 {
+  // imencode JPEG es de lo mas caro del stage "post": sin suscriptores
+  // (nadie mirando el monitor web) no se codifica.
+  if (pub_compressed_->get_subscription_count() == 0) {return;}
   const std::vector<int> encode_param = {
     cv::IMWRITE_JPEG_QUALITY, jpeg_quality_};
   std::vector<uchar> compressed;
@@ -453,6 +460,7 @@ void GaitRecorderNode::publishCompressed(const cv::Mat & img)
 
 void GaitRecorderNode::publishRaw(const cv::Mat & img)
 {
+  if (pub_raw_->get_subscription_count() == 0) {return;}
   auto msg =
     cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img).toImageMsg();
   msg->header.stamp = now();
@@ -501,6 +509,7 @@ void GaitRecorderNode::startRecording()
     static_cast<int>(image_zed_.getWidth()),
     static_cast<int>(image_zed_.getHeight()));
   config.video_fps = static_cast<double>(fps_);
+  config.video_enabled = video_recording_;
   config.video_hw_encoder = video_hw_encoder_;
   config.video_bitrate = video_bitrate_;
   config.svo_enabled = svo_recording_;

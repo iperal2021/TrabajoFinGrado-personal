@@ -23,9 +23,13 @@ struct SessionConfig
   int camera_serial{0};       // columna camera_sn del CSV
   cv::Size video_size;
   double video_fps{30.0};
+  // El objetivo del paquete es el CSV de joints: MP4 y SVO2 son opcionales
+  // y por defecto OFF porque codificar video por frame baja los FPS de
+  // captura justo cuando importa la precision temporal del muestreo.
+  bool video_enabled{false};
   bool video_hw_encoder{true};
   int video_bitrate{4000000};
-  bool svo_enabled{true};
+  bool svo_enabled{false};
   std::string svo_compression{"H265"};
   uint64_t min_free_space_mb{1024};
 };

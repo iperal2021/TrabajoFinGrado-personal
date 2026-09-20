@@ -38,13 +38,16 @@
     jpeg_quality: 80
     publish_raw_image: false
 
-    # Grabacion (ADR-010/011/012).
+    # Grabacion (ADR-010/011/012). El producto es el CSV de joints: video
+    # MP4 y SVO2 son opcionales y OFF por defecto porque codificar por frame
+    # baja los FPS de captura durante la toma de datos.
     record_topic: "/gait_record"
     recording_directory: "~/Documents/ZED"
     csv_sample_period_s: 0.05
+    video_recording: false
     video_hw_encoder: true
     video_bitrate: 4000000
-    svo_recording: true
+    svo_recording: false
     svo_compression: "H265"
     min_free_space_mb: 1024
 
