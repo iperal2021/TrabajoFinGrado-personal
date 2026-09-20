@@ -282,8 +282,8 @@
       <path d="M12 22C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10z"/>
       <path d="M12 8v4M12 16h.01"/>
     </svg>
-    <p>Sin conexión a ROS2</p>
-    <small>Haz clic en "Sin conexión" para configurar el host de rosbridge</small>
+    <p>Conectando con ROS2…</p>
+    <small>La conexión y el escaneo de cámaras son automáticos; haz clic en el estado para cambiar de host</small>
   </div>
 
   <div id="cam-grid"></div>
@@ -357,11 +357,22 @@ function connect() {
   const port = document.getElementById('m-port').value.trim() || '9090';
   closeModal();
   if (ros) { try { ros.close(); } catch(e) {} }
-  setConn('connecting', 'Conectando');
+  setConn('connecting', 'Conectando…');
   ros = new ROSLIB.Ros({ url: `ws://${host}:${port}` });
   ros.on('connection', () => { setConn('connected', `${host}:${port}`); toast('Conectado'); scanCameras(); });
-  ros.on('error',      () => { setConn('error', 'Error de conexión'); toast('No se pudo conectar'); });
-  ros.on('close',      () => { setConn('', 'Sin conexión'); clearAll(); });
+  ros.on('error',      () => { setConn('error', 'Error de conexión'); retryConnect(); });
+  ros.on('close',      () => { setConn('', 'Sin conexión'); clearAll(); retryConnect(); });
+}
+
+// Reintento automatico: la interfaz se levanta sola aunque rosbridge o el
+// nodo arranquen despues.
+let retryTimer = null;
+function retryConnect() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (!ros || !ros.isConnected) connect();
+  }, 4000);
 }
 
 // -- Scan ------------------------------------------------------------------
@@ -378,7 +389,9 @@ function scanCameras() {
     topics.forEach(t => { const m = t.match(re); if (m) found.add(m[1]); });
 
     if (found.size === 0) {
-      setState('No se encontraron tópicos /*/image_annotated/compressed');
+      setState('Esperando tópicos /*/image_annotated/compressed …');
+      // Reintenta solo: el nodo puede arrancar despues que la interfaz.
+      setTimeout(() => { if (ros && ros.isConnected && cameras.length === 0) scanCameras(); }, 3000);
       return;
     }
     Array.from(found).sort().forEach(addCamera);
@@ -557,7 +570,12 @@ function toast(msg) {
 }
 
 // -- Init ------------------------------------------------------------------
-window.addEventListener('DOMContentLoaded', openModal);
+// Conexion automatica: mismo host que sirve la pagina, puerto 9090. El
+// modal (clic en el pill de conexion) queda para apuntar a otra maquina.
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('m-host').value = location.hostname || 'localhost';
+  connect();
+});
 </script>
 </body>
 </html>

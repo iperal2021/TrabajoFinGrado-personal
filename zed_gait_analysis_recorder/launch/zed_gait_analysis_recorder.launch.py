@@ -11,7 +11,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import (DeclareLaunchArgument, OpaqueFunction,
+                            SetEnvironmentVariable)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -92,6 +93,9 @@ def generate_launch_description():
         'config', 'default.yaml')
 
     return LaunchDescription([
+        # Mismo RMW que start.sh/rosbridge, sin depender de exports del shell.
+        SetEnvironmentVariable('RMW_IMPLEMENTATION', 'rmw_cyclonedds_cpp'),
+        SetEnvironmentVariable('ROS_DOMAIN_ID', '0'),
         DeclareLaunchArgument(
             'camera_serials',
             default_value='',
