@@ -1,0 +1,34 @@
+# Parametros por defecto de gait_recorder_node (zed_gait_v2).
+/**:
+  ros__parameters:
+    # Camara: 0 = primera disponible; si no, numero de serie concreto.
+    camera_serial: 0
+    # Alias estable para namespace/topics; vacio = "zed<serial>".
+    camera_alias: ""
+    # Ruta a un SVO para modo simulacion; vacio = camara real.
+    svo_path: ""
+    # En modo SVO, true = repite el video en bucle (pruebas locales).
+    svo_loop: false
+
+    # Captura. HD720@60: el SVO2 graba estereo crudo + IMU a esta config;
+    # la profundidad se recalcula al reproducir (aqui esta desactivada).
+    resolution: "HD720"
+    fps: 60
+
+    # Preview 2D para la interfaz (/<alias>/image_annotated/compressed).
+    # Solo se codifica JPEG cuando hay suscriptores.
+    jpeg_quality: 50
+
+    # Grabacion: Bool en record_topic inicia/detiene todas las camaras.
+    # Metadatos por los topics fijos de la interfaz:
+    #   /gait_session_patient_id (String), /gait_session_phase (String),
+    #   /gait_session_notes (String), /gait_session_accept (Bool).
+    record_topic: "/gait_record"
+    # Un directorio por paciente: <dir>/<id>/<id>_<FASE>_<stamp>.svo2|.txt
+    recording_directory: "~/Documents/patient_records"
+    svo_compression: "H265"   # fallback automatico a H264
+    min_free_space_mb: 1024
+
+    # Apertura de camara.
+    open_retries: 5
+    open_retry_delay_s: 2.0
