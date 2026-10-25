@@ -22,8 +22,9 @@ namespace zed_gait
 //
 // Flujo de sesion (topics fijos de la interfaz):
 //   1. La interfaz publica patient_id + phase y luego /gait_record=true.
-//   2. El nodo graba <id>_<FASE>_<stamp>.svo2 en
-//      ~/Documents/patient_records/<id>/ hasta /gait_record=false.
+//   2. El nodo graba <id>_<FASE>_<stamp>_<alias>.svo2 (alias=zed<serial>,
+//      un fichero por camara) en ~/Documents/patient_records/<id>/ hasta
+//      /gait_record=false.
 //   3. Al parar, la interfaz publica notes + /gait_session_accept:
 //      accept=true escribe el .txt de metadatos; false borra el .svo2.
 class GaitRecorderNode : public rclcpp::Node

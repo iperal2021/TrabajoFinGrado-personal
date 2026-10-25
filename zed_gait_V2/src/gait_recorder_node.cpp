@@ -327,8 +327,19 @@ void GaitRecorderNode::startRecording()
     return;
   }
 
+  if (session_pending_) {
+    RCLCPP_WARN(
+      get_logger(),
+      "[%s] La sesion anterior quedo sin aceptar/descartar; su .txt no se "
+      "escribio", camera_alias_.c_str());
+  }
+
   session_stamp_ = currentStamp();
-  session_base_ = dir + "/" + id + "_" + phase + "_" + session_stamp_;
+  // El alias (= zed<serial> por defecto) hace unico el fichero por camara:
+  // sin el, dos nodos grabarian sobre la misma ruta y el SVO2 quedaria
+  // corrupto (ilegible en ZED Explorer).
+  session_base_ =
+    dir + "/" + id + "_" + phase + "_" + session_stamp_ + "_" + camera_alias_;
   const std::string svo_file = session_base_ + ".svo2";
 
   sl::SVO_COMPRESSION_MODE mode = sl::SVO_COMPRESSION_MODE::H265;
@@ -422,8 +433,7 @@ void GaitRecorderNode::cbAccept(const std_msgs::msg::Bool::SharedPtr msg)
       << "resolucion: " << resolution_ << '@' << fps_ << '\n'
       << "duracion_s: " << std::fixed << std::setprecision(1)
       << session_duration_s_ << '\n'
-      << "svo: " << session_id_ << '_' << session_phase_ << '_'
-      << session_stamp_ << ".svo2\n";
+      << "svo: " << fs::path(session_base_).filename().string() << ".svo2\n";
   RCLCPP_INFO(
     get_logger(), "[%s] Sesion aceptada: %s + %s", camera_alias_.c_str(),
     svo_file.c_str(), txt_file.c_str());

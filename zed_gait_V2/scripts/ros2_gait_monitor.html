@@ -409,6 +409,7 @@
 let ros = null;
 let cameras = [];          // { idx, prefix, name, topic_img, topic_state, sub, subState, recording, fc, fpsT }
 let globalRecording = false;
+let cmdTopics = null;      // topics de comando persistentes (ver setupCmdTopics)
 
 // -- Clock -----------------------------------------------------------------
 setInterval(() => {
@@ -450,7 +451,7 @@ function connect() {
   if (ros) { try { ros.close(); } catch(e) {} }
   setConn('connecting', 'Conectando…');
   ros = new ROSLIB.Ros({ url: `ws://${host}:${port}` });
-  ros.on('connection', () => { setConn('connected', `${host}:${port}`); toast('Conectado'); scanCameras(); });
+  ros.on('connection', () => { setConn('connected', `${host}:${port}`); setupCmdTopics(); toast('Conectado'); scanCameras(); });
   ros.on('error',      () => { setConn('error', 'Error de conexión'); retryConnect(); });
   ros.on('close',      () => { setConn('', 'Sin conexión'); clearAll(); retryConnect(); });
 }
@@ -615,11 +616,24 @@ function setBadge(idx, state) {
   else { b.className = 'cam-badge'; b.textContent = 'En espera'; }
 }
 
-// -- Publishing ------------------------------------------------------------
-function pub(topicName, value) {
-  const t = new ROSLIB.Topic({ ros, name: topicName, messageType: 'std_msgs/msg/Bool' });
-  t.publish(new ROSLIB.Message({ data: value }));
-  setTimeout(() => t.unadvertise(), 600);
+// -- Topics de comando (persistentes) ---------------------------------------
+// Se anuncian UNA vez al conectar. Crear un Topic nuevo por publish
+// (advertise + publish en el mismo instante) compite con el descubrimiento
+// DDS: el mensaje sale antes de que el nodo descubra al publisher y se
+// pierde silenciosamente (comandos de grabacion que "no llegan").
+function setupCmdTopics() {
+  const mk = (name, type) => new ROSLIB.Topic({ ros, name, messageType: type });
+  cmdTopics = {
+    record:     mk('/gait_record',             'std_msgs/msg/Bool'),
+    accept:     mk('/gait_session_accept',     'std_msgs/msg/Bool'),
+    patient_id: mk('/gait_session_patient_id', 'std_msgs/msg/String'),
+    phase:      mk('/gait_session_phase',      'std_msgs/msg/String'),
+    notes:      mk('/gait_session_notes',      'std_msgs/msg/String'),
+  };
+}
+
+function pub(key, value) {
+  cmdTopics[key].publish(new ROSLIB.Message({ data: value }));
 }
 
 // -- Estado por cámara (feedback desde /<alias>/recording_state) -----------
@@ -633,10 +647,8 @@ function updateCamState(idx, active) {
 }
 
 // -- Publishing (String) -----------------------------------------------------
-function pubString(topicName, value) {
-  const t = new ROSLIB.Topic({ ros, name: topicName, messageType: 'std_msgs/msg/String' });
-  t.publish(new ROSLIB.Message({ data: value }));
-  setTimeout(() => t.unadvertise(), 600);
+function pubString(key, value) {
+  cmdTopics[key].publish(new ROSLIB.Message({ data: value }));
 }
 
 // -- Global recording ---------------------------------------------------------
@@ -675,15 +687,15 @@ function attemptStartRecording() {
 function choosePhase(phase) {
   const id = document.getElementById('patient-id').value.trim();
   closePhaseModal();
-  pubString('/gait_session_patient_id', id);
-  pubString('/gait_session_phase', phase);
-  pub('/gait_record', true);
+  pubString('patient_id', id);
+  pubString('phase', phase);
+  pub('record', true);
   setRecordButtonState(true);
   toast(`Grabación iniciada — ${id} (${phase.toUpperCase()})`);
 }
 
 function attemptStopRecording() {
-  pub('/gait_record', false);
+  pub('record', false);
   setRecordButtonState(false);
   toast('Orden de parada enviada');
   openEndSessionModal();
@@ -693,8 +705,8 @@ function finishSession(accept) {
   const notes = document.getElementById('m-endnotes').value;
   document.getElementById('notes-live').value = notes;  // conserva el texto en el cuadro persistente
   document.getElementById('modal-endsession').classList.remove('open');
-  pubString('/gait_session_notes', notes);
-  pub('/gait_session_accept', accept);
+  pubString('notes', notes);
+  pub('accept', accept);
   toast(accept ? 'Sesión aceptada — el nodo la conserva' : 'Sesión descartada');
 }
 

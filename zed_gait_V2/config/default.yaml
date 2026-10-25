@@ -24,7 +24,8 @@
     #   /gait_session_patient_id (String), /gait_session_phase (String),
     #   /gait_session_notes (String), /gait_session_accept (Bool).
     record_topic: "/gait_record"
-    # Un directorio por paciente: <dir>/<id>/<id>_<FASE>_<stamp>.svo2|.txt
+    # Un directorio por paciente, un fichero por camara (alias=zed<serial>):
+    #   <dir>/<id>/<id>_<FASE>_<stamp>_<alias>.svo2|.txt
     recording_directory: "~/Documents/patient_records"
     svo_compression: "H265"   # fallback automatico a H264
     min_free_space_mb: 1024
