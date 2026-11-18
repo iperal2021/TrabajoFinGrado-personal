@@ -1,6 +1,5 @@
 #include "zed_gait_analysis_recorder/gait_recorder_node.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -9,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -69,12 +69,30 @@ std::string sanitizeId(const std::string & id)
   return out;
 }
 
-std::string upper(std::string s)
+// Lee records_dir de la config del servidor del monitor web
+// (gait_monitor_server.py la escribe al crear/seleccionar la carpeta).
+// JSON plano: basta una regex, sin dependencia de parser.
+std::string configuredRecordsDir()
 {
-  std::transform(
-    s.begin(), s.end(), s.begin(),
-    [](unsigned char c) {return static_cast<char>(std::toupper(c));});
-  return s;
+  const char * xdg = std::getenv("XDG_CONFIG_HOME");
+  const char * home = std::getenv("HOME");
+  std::string base;
+  if (xdg != nullptr && *xdg != '\0') {
+    base = xdg;
+  } else if (home != nullptr) {
+    base = std::string(home) + "/.config";
+  } else {
+    return "";
+  }
+  std::ifstream f(base + "/gait_monitor/config.json");
+  if (!f) {return "";}
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string content = ss.str();
+  std::smatch m;
+  const std::regex re(R"json("records_dir"\s*:\s*"([^"]+)")json");
+  if (std::regex_search(content, m, re)) {return m[1].str();}
+  return "";
 }
 
 }  // namespace
@@ -93,12 +111,13 @@ GaitRecorderNode::GaitRecorderNode()
   jpeg_quality_ = declare_parameter<int>("jpeg_quality", 50);
   record_topic_ = declare_parameter<std::string>("record_topic", "/gait_record");
   recording_directory_ = declare_parameter<std::string>(
-    "recording_directory", "~/Documents/patient_records");
+    "recording_directory", "");
   svo_compression_ = declare_parameter<std::string>("svo_compression", "H265");
   min_free_space_mb_ = static_cast<uint64_t>(
     declare_parameter<int64_t>("min_free_space_mb", 1024));
   open_retries_ = declare_parameter<int>("open_retries", 5);
   open_retry_delay_s_ = declare_parameter<double>("open_retry_delay_s", 2.0);
+  start_delay_ms_ = declare_parameter<int>("start_delay_ms", 500);
 
   // ---- Camara (con reintentos) ----
   openCamera();
@@ -128,9 +147,6 @@ GaitRecorderNode::GaitRecorderNode()
   sub_phase_ = create_subscription<std_msgs::msg::String>(
     "/gait_session_phase", 10,
     std::bind(&GaitRecorderNode::cbPhase, this, std::placeholders::_1));
-  sub_notes_ = create_subscription<std_msgs::msg::String>(
-    "/gait_session_notes", 10,
-    std::bind(&GaitRecorderNode::cbNotes, this, std::placeholders::_1));
   publishState(false);
 
   const auto period =
@@ -138,13 +154,16 @@ GaitRecorderNode::GaitRecorderNode()
   timer_ =
     create_wall_timer(period, std::bind(&GaitRecorderNode::processFrame, this));
 
+  const std::string dir_info = recording_directory_.empty() ?
+    "auto (config del monitor o ~/Documents/patient_records)" :
+    expandUser(recording_directory_);
   RCLCPP_INFO(
     get_logger(),
     "[%s] Nodo listo: serial=%d %s@%dfps (depth off) | imagen en %s | "
     "grabacion en %s (control: %s)",
     camera_alias_.c_str(), camera_serial_, resolution_.c_str(), fps_,
     (base + "image_annotated/compressed").c_str(),
-    expandUser(recording_directory_).c_str(), record_topic_.c_str());
+    dir_info.c_str(), record_topic_.c_str());
 }
 
 GaitRecorderNode::~GaitRecorderNode()
@@ -270,8 +289,24 @@ void GaitRecorderNode::publishCompressed(const cv::Mat & img)
 void GaitRecorderNode::cbRecord(const std_msgs::msg::Bool::SharedPtr msg)
 {
   if (msg->data) {
-    startRecording();
+    // La interfaz publica patient_id, phase y record=true en rafaga por
+    // topics DISTINTOS y DDS no garantiza orden entre topics: si este true
+    // se procesa primero, la sesion arrancaria con metadatos viejos o
+    // vacios (visto: "Sin patient_id cacheado" + arranque con la fase de
+    // la sesion anterior). Se retrasa el arranque un margen corto para que
+    // los metadatos de ESTA sesion esten cacheados.
+    if (!recording_ && !pending_start_) {
+      pending_start_ = create_wall_timer(
+        std::chrono::milliseconds(start_delay_ms_),
+        [this]() {
+          pending_start_.reset();  // one-shot
+          startRecording();
+        });
+    }
   } else {
+    if (pending_start_) {
+      pending_start_.reset();  // stop antes de que arrancara: se cancela
+    }
     stopRecording();
   }
 }
@@ -284,11 +319,6 @@ void GaitRecorderNode::cbPatientId(const std_msgs::msg::String::SharedPtr msg)
 void GaitRecorderNode::cbPhase(const std_msgs::msg::String::SharedPtr msg)
 {
   phase_ = msg->data;
-}
-
-void GaitRecorderNode::cbNotes(const std_msgs::msg::String::SharedPtr msg)
-{
-  notes_ = msg->data;
 }
 
 void GaitRecorderNode::startRecording()
@@ -308,8 +338,19 @@ void GaitRecorderNode::startRecording()
   }
 
   const std::string id = sanitizeId(patient_id_);
-  const std::string phase = phase_.empty() ? "NA" : upper(phase_);
-  const std::string dir = expandUser(recording_directory_) + "/" + id;
+  // Fase en minusculas: misma convencion que el .txt del servidor
+  // (<id>_<pre|post>_<sello>.txt).
+  const std::string phase = phase_.empty() ? "na" : phase_;
+  // Directorio: parametro si se indico; si no, el que eligio la interfaz
+  // (config de gait_monitor_server.py); si no hay config, el historico.
+  std::string base_dir = expandUser(recording_directory_);
+  if (base_dir.empty()) {
+    base_dir = configuredRecordsDir();
+  }
+  if (base_dir.empty()) {
+    base_dir = expandUser("~/Documents/patient_records");
+  }
+  const std::string dir = base_dir + "/" + id;
 
   std::error_code ec;
   fs::create_directories(dir, ec);
@@ -368,8 +409,6 @@ void GaitRecorderNode::startRecording()
 
   recording_ = true;
   session_pending_ = false;
-  session_id_ = id;
-  session_phase_ = phase;
   session_start_ = std::chrono::steady_clock::now();
   publishState(true);
   RCLCPP_INFO(
@@ -390,10 +429,23 @@ void GaitRecorderNode::stopRecording()
   // la interfaz publique /gait_session_accept.
   session_pending_ = true;
   publishState(false);
-  RCLCPP_INFO(
-    get_logger(),
-    "[%s] Grabacion detenida (%.1f s); pendiente de aceptar/descartar",
-    camera_alias_.c_str(), session_duration_s_);
+  // Evidencia en el log de que el SVO2 ya esta en disco (y su tamano) en el
+  // momento del stop; si falta o esta vacio, se ve aqui.
+  std::error_code ec_size;
+  const auto svo_size =
+    fs::file_size(session_base_ + ".svo2", ec_size);
+  if (ec_size) {
+    RCLCPP_ERROR(
+      get_logger(), "[%s] Tras parar, el SVO2 no existe: %s.svo2",
+      camera_alias_.c_str(), session_base_.c_str());
+  } else {
+    RCLCPP_INFO(
+      get_logger(),
+      "[%s] Grabacion detenida (%.1f s): %s.svo2 guardado (%.1f MB); "
+      "pendiente de aceptar/descartar",
+      camera_alias_.c_str(), session_duration_s_, session_base_.c_str(),
+      static_cast<double>(svo_size) / 1048576.0);
+  }
 }
 
 void GaitRecorderNode::cbAccept(const std_msgs::msg::Bool::SharedPtr msg)
@@ -416,27 +468,12 @@ void GaitRecorderNode::cbAccept(const std_msgs::msg::Bool::SharedPtr msg)
     return;
   }
 
-  // Aceptada: .txt de metadatos junto al SVO2 (mismo nombre base).
-  const std::string txt_file = session_base_ + ".txt";
-  std::ofstream txt(txt_file, std::ios::out | std::ios::trunc);
-  if (!txt) {
-    RCLCPP_ERROR(
-      get_logger(), "[%s] No se pudo escribir %s", camera_alias_.c_str(),
-      txt_file.c_str());
-    return;
-  }
-  txt << "paciente_id: " << patient_id_ << '\n'
-      << "fase: " << session_phase_ << '\n'
-      << "notas: " << notes_ << '\n'
-      << "fecha: " << session_stamp_ << '\n'
-      << "camara_serial: " << camera_serial_ << '\n'
-      << "resolucion: " << resolution_ << '@' << fps_ << '\n'
-      << "duracion_s: " << std::fixed << std::setprecision(1)
-      << session_duration_s_ << '\n'
-      << "svo: " << fs::path(session_base_).filename().string() << ".svo2\n";
+  // Aceptada: el SVO2 ya esta en disco desde el stop. El .txt de
+  // observaciones lo escribe el servidor del monitor (POST
+  // /api/session/notes); aqui no se duplica.
   RCLCPP_INFO(
-    get_logger(), "[%s] Sesion aceptada: %s + %s", camera_alias_.c_str(),
-    svo_file.c_str(), txt_file.c_str());
+    get_logger(), "[%s] Sesion aceptada: %s", camera_alias_.c_str(),
+    svo_file.c_str());
 }
 
 void GaitRecorderNode::publishState(bool recording)

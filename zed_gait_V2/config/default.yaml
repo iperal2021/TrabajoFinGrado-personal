@@ -22,13 +22,22 @@
     # Grabacion: Bool en record_topic inicia/detiene todas las camaras.
     # Metadatos por los topics fijos de la interfaz:
     #   /gait_session_patient_id (String), /gait_session_phase (String),
-    #   /gait_session_notes (String), /gait_session_accept (Bool).
+    #   /gait_session_accept (Bool).
     record_topic: "/gait_record"
     # Un directorio por paciente, un fichero por camara (alias=zed<serial>):
-    #   <dir>/<id>/<id>_<FASE>_<stamp>_<alias>.svo2|.txt
-    recording_directory: "~/Documents/patient_records"
+    #   <dir>/<id>/<id>_<pre|post>_<stamp>_<alias>.svo2
+    # Vacio = usar la carpeta elegida en la interfaz (config de
+    # gait_monitor_server.py en ~/.config/gait_monitor/config.json);
+    # si no hay config, ~/Documents/patient_records.
+    recording_directory: ""
     svo_compression: "H265"   # fallback automatico a H264
     min_free_space_mb: 1024
+
+    # Margen (ms) entre /gait_record=true y el arranque real: la interfaz
+    # publica id+fase+record en rafaga por topics distintos y DDS no
+    # garantiza orden entre topics; sin margen la sesion usaria metadatos
+    # de la sesion anterior.
+    start_delay_ms: 500
 
     # Apertura de camara.
     open_retries: 5

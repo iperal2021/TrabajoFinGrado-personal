@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>zed_gait_v2</name>
+  <version>0.1.0</version>
+  <description>Nodo ROS 2 por camara ZED: publica imagen 2D para la interfaz web y graba SVO2 (estereo crudo + IMU) por paciente en ~/Documents/patient_records</description>
+
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

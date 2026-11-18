@@ -41,13 +41,15 @@ ROSBRIDGE_PID=$!
 sleep 2
 
 echo "=== Arrancando servidor web (puerto 8080) ==="
+# gait_monitor_server.py sirve la pagina y la API JSON de la carpeta de
+# registros (el navegador no puede tocar el disco).
 cd "$DIR"
-python3 -m http.server 8080 &
+python3 gait_monitor_server.py --port 8080 &
 SERVER_PID=$!
 sleep 1
 
 echo "=== Abriendo navegador ==="
-xdg-open http://localhost:8080/ros2_gait_monitor.html &
+xdg-open "http://localhost:8080/ros2_gait_monitor%201.html" &
 
 echo ""
 echo "Directorio: $DIR"
